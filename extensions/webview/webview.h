@@ -22,6 +22,7 @@
 @property NSMutableArray  *children ;
 @property int             udRef ;
 @property int             windowCallback ;
+@property int             keyCallback ;
 @property BOOL            allowKeyboardEntry ;
 @property BOOL            darkMode ;
 @property BOOL            titleFollow ;

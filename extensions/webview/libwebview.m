@@ -101,6 +101,7 @@ void delayUntilViewStopsLoading(HSWebViewView *theView, dispatch_block_t block) 
         _children           = [[NSMutableArray alloc] init] ;
         _udRef              = LUA_NOREF ;
         _windowCallback     = LUA_NOREF ;
+        _keyCallback        = LUA_NOREF ;
         _titleFollow        = YES ;
         _deleteOnClose      = NO ;
         _allowKeyboardEntry = NO;
@@ -120,6 +121,63 @@ void delayUntilViewStopsLoading(HSWebViewView *theView, dispatch_block_t block) 
 
 - (BOOL)canBecomeKeyWindow {
     return _allowKeyboardEntry ;
+}
+
+- (void)sendEvent:(NSEvent *)event {
+    NSEventType eventType = event.type ;
+    if (_keyCallback != LUA_NOREF &&
+        (eventType == NSEventTypeKeyDown || eventType == NSEventTypeKeyUp)) {
+        LuaSkin *skin = [LuaSkin sharedWithState:NULL] ;
+        lua_State *L = skin.L ;
+
+        if ([skin checkGCCanary:self.lsCanary]) {
+            _lua_stackguard_entry(L);
+            [skin pushLuaRef:refTable ref:_keyCallback] ;
+            [skin pushNSObject:self] ;
+
+            lua_newtable(L) ;
+            [skin pushNSObject:(eventType == NSEventTypeKeyDown ? @"keyDown" : @"keyUp")] ;
+            lua_setfield(L, -2, "type") ;
+            lua_pushinteger(L, event.keyCode) ;
+            lua_setfield(L, -2, "keyCode") ;
+            [skin pushNSObject:event.characters ?: @""] ;
+            lua_setfield(L, -2, "characters") ;
+            [skin pushNSObject:event.charactersIgnoringModifiers ?: @""] ;
+            lua_setfield(L, -2, "charactersIgnoringModifiers") ;
+            lua_pushboolean(L, event.isARepeat) ;
+            lua_setfield(L, -2, "isRepeat") ;
+
+            NSEventModifierFlags flags = event.modifierFlags ;
+            lua_newtable(L) ;
+            lua_pushboolean(L, (flags & NSEventModifierFlagCommand) != 0) ;
+            lua_setfield(L, -2, "cmd") ;
+            lua_pushboolean(L, (flags & NSEventModifierFlagOption) != 0) ;
+            lua_setfield(L, -2, "alt") ;
+            lua_pushboolean(L, (flags & NSEventModifierFlagControl) != 0) ;
+            lua_setfield(L, -2, "ctrl") ;
+            lua_pushboolean(L, (flags & NSEventModifierFlagShift) != 0) ;
+            lua_setfield(L, -2, "shift") ;
+            lua_pushboolean(L, (flags & NSEventModifierFlagFunction) != 0) ;
+            lua_setfield(L, -2, "fn") ;
+            lua_pushboolean(L, (flags & NSEventModifierFlagCapsLock) != 0) ;
+            lua_setfield(L, -2, "capslock") ;
+            lua_setfield(L, -2, "modifiers") ;
+
+            BOOL consumed = NO ;
+            if ([skin protectedCallAndTraceback:2 nresults:1]) {
+                consumed = (BOOL)lua_toboolean(L, -1) ;
+            } else {
+                const char *errorMsg = lua_tostring(L, -1) ;
+                [skin logError:[NSString stringWithFormat:@"hs.webview:keyCallback error: %s", errorMsg ?: "unknown error"]] ;
+            }
+            lua_pop(L, 1) ;
+            _lua_stackguard_exit(L);
+
+            if (consumed) return ;
+        }
+    }
+
+    [super sendEvent:event] ;
 }
 
 - (BOOL)windowShouldClose:(id __unused)sender {
@@ -593,6 +651,10 @@ void delayUntilViewStopsLoading(HSWebViewView *theView, dispatch_block_t block) 
         if (((HSWebViewWindow *)theView.window).windowCallback != LUA_NOREF) {
             [skin pushLuaRef:refTable ref:((HSWebViewWindow *)theView.window).windowCallback];
             newWindow.windowCallback = [skin luaRef:refTable] ;
+        }
+        if (((HSWebViewWindow *)theView.window).keyCallback != LUA_NOREF) {
+            [skin pushLuaRef:refTable ref:((HSWebViewWindow *)theView.window).keyCallback];
+            newWindow.keyCallback = [skin luaRef:refTable] ;
         }
 
         HSWebViewView *newView = [[HSWebViewView alloc] initWithFrame:((NSView *)newWindow.contentView).bounds
@@ -1963,6 +2025,27 @@ static int webview_show(lua_State *L) {
     return 1;
 }
 
+/// hs.webview:focus() -> webviewObject
+/// Method
+/// Activates Hammerspoon and makes the webview the application's key window.
+///
+/// Parameters:
+///  * None
+///
+/// Returns:
+///  * The webview object
+static int webview_focus(lua_State *L) {
+    LuaSkin *skin = [LuaSkin sharedWithState:L] ;
+    [skin checkArgs:LS_TUSERDATA, USERDATA_TAG, LS_TBREAK] ;
+
+    HSWebViewWindow *theWindow = get_objectFromUserdata(__bridge HSWebViewWindow, L, 1, USERDATA_TAG) ;
+    [NSApp activateIgnoringOtherApps:YES] ;
+    [theWindow makeKeyAndOrderFront:nil] ;
+
+    lua_pushvalue(L, 1) ;
+    return 1 ;
+}
+
 /// hs.webview:hide([fadeOutTime]) -> webviewObject
 /// Method
 /// Hides the webview object
@@ -2523,6 +2606,41 @@ static int webview_windowCallback(lua_State *L) {
     return 1;
 }
 
+/// hs.webview:keyCallback([fn]) -> webviewObject | function
+/// Method
+/// Get, set, or clear a native keyboard callback for the webview window.
+///
+/// Parameters:
+///  * `fn` - an optional function, or explicit nil to clear the callback. The function receives the webview and an event table containing `type`, `keyCode`, `characters`, `charactersIgnoringModifiers`, `isRepeat`, and `modifiers`. Return true to consume the event, or false/nil to continue normal WebKit handling.
+///
+/// Returns:
+///  * When setting or clearing the callback, the webview object; when called without arguments, the current callback or nil.
+static int webview_keyCallback(lua_State *L) {
+    LuaSkin *skin = [LuaSkin sharedWithState:L] ;
+    [skin checkArgs:LS_TUSERDATA, USERDATA_TAG,
+                    LS_TFUNCTION | LS_TNIL | LS_TOPTIONAL,
+                    LS_TBREAK] ;
+
+    HSWebViewWindow *theWindow = get_objectFromUserdata(__bridge HSWebViewWindow, L, 1, USERDATA_TAG) ;
+    if (lua_gettop(L) == 1) {
+        if (theWindow.keyCallback != LUA_NOREF) {
+            [skin pushLuaRef:refTable ref:theWindow.keyCallback] ;
+        } else {
+            lua_pushnil(L) ;
+        }
+        return 1 ;
+    }
+
+    theWindow.keyCallback = [skin luaUnref:refTable ref:theWindow.keyCallback] ;
+    if (lua_type(L, 2) == LUA_TFUNCTION) {
+        lua_pushvalue(L, 2) ;
+        theWindow.keyCallback = [skin luaRef:refTable] ;
+    }
+
+    lua_settop(L, 1) ;
+    return 1 ;
+}
+
 #pragma mark - Module Constants
 
 /// hs.webview.windowMasks[]
@@ -3048,6 +3166,7 @@ static int userdata_gc(lua_State* L) {
         LuaSkin *skin = [LuaSkin sharedWithState:L];
         theWindow.udRef            = [skin luaUnref:refTable ref:theWindow.udRef] ;
         theWindow.windowCallback   = [skin luaUnref:refTable ref:theWindow.windowCallback] ;
+        theWindow.keyCallback      = [skin luaUnref:refTable ref:theWindow.keyCallback] ;
         theView.navigationCallback = [skin luaUnref:refTable ref:theView.navigationCallback] ;
         theView.policyCallback     = [skin luaUnref:refTable ref:theView.policyCallback] ;
 
@@ -3148,6 +3267,7 @@ static const luaL_Reg userdata_metaLib[] = {
 
     {"titleVisibility",            webview_titleVisibility},
     {"show",                       webview_show},
+    {"focus",                      webview_focus},
     {"hide",                       webview_hide},
     {"closeOnEscape",              webview_closeOnEscape},
     {"allowTextEntry",             webview_allowTextEntry},
@@ -3162,6 +3282,7 @@ static const luaL_Reg userdata_metaLib[] = {
     {"orderBelow",                 webview_orderBelow},
     {"behavior",                   webview_behavior},
     {"windowCallback",             webview_windowCallback},
+    {"keyCallback",                webview_keyCallback},
     {"topLeft",                    webview_topLeft},
     {"size",                       webview_size},
     {"isVisible",                  webview_isVisible},
