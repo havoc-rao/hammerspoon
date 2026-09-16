@@ -1,0 +1,87 @@
+name: Release Build (macOS)
+
+# 打 v* 标签时自动构建 macOS 版并发布 GitHub Release（附 .app.zip / dSYM / docs）
+#
+# 与上游差异：
+#   - 不导入签名证书（没有 Hammerspoon/ci-secrets），改用 CODE_SIGN_IDENTITY=-
+#     （ad-hoc 签名），因此产物未经公证，首次打开需右键 -> 打开
+#   - 不更新 Sparkle appcast / 官网 / Sentry / Dash（需要对应凭据）
+#   - Release 断言要求的 Sentry token 文件用占位文件满足，未传 -u 不会真正使用
+#
+# 详见 docs/release-builds.md
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Publish Release
+    runs-on: macos-15
+    env:
+      IS_CI: 1
+
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: 16.1.0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare build environment
+        run: ./scripts/github-ci-pre.sh
+
+      - name: Provide Sentry token placeholder
+        # op_build_assert() 对 Release 配置要求存在
+        # ${TOKENPATH}/token-sentry-api 文件；没有 -u（不上传 dSYM 到 Sentry）
+        # 时该 token 不会被读取，占位即可。
+        run: |
+          mkdir -p ..
+          touch ../token-sentry-api
+
+      - name: Build Release (ad-hoc signed)
+        env:
+          CODE_SIGN_IDENTITY: "-"
+        run: ./scripts/build.sh build -s Release -c Release
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=$(git describe --abbrev=0)" >> "$GITHUB_OUTPUT"
+
+      - name: Create app zip
+        # op_archive() 需要 build/Hammerspoon.app-${VERSION}.zip；
+        # 上游在 op_notarize 里生成该 zip，我们跳过公证，所以手动打。
+        run: ditto --norsrc -c -k --keepParent "build/Hammerspoon.app" "build/Hammerspoon.app-${{ steps.version.outputs.VERSION }}.zip"
+
+      - name: Build docs
+        run: ./scripts/build.sh docs
+
+      - name: Archive artifacts
+        # 产出 ../archive/${VERSION}/ 下的 .app zip、dSYM zip、docs zip、构建日志
+        run: ./scripts/build.sh archive
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Release-build.log
+          path: build/Release-build.log
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # tag 触发时默认使用当前 tag；产物是 ad-hoc 构建
+          files: |
+            ../archive/${{ steps.version.outputs.VERSION }}/Hammerspoon.app-*.zip
+            ../archive/${{ steps.version.outputs.VERSION }}/Hammerspoon-dSYM-*.zip
+            ../archive/${{ steps.version.outputs.VERSION }}/docs/*-docs.zip
+          generate_release_notes: true
+          overwrite: true
+          fail_on_unmatched_files: false
