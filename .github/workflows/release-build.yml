@@ -59,14 +59,19 @@ jobs:
         # 另外跳过 -exportArchive（method=developer-id 会强制要求证书），
         # 直接从 xcarchive 拷出 .app 即可，产物等价。
         run: |
-          set -euo pipefail
-          xcodebuild -workspace Hammerspoon.xcworkspace \
+          set -uo pipefail
+          # 失败时打印原始日志尾部（xcbeautify 会过滤掉部分 error 行）
+          if ! xcodebuild -workspace Hammerspoon.xcworkspace \
             -scheme Release \
             -configuration Release \
             -destination "platform=macOS" \
             -archivePath "build/Hammerspoon.app.xcarchive" \
             CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= \
-            archive 2>&1 | tee build/Release-build.log | xcbeautify
+            archive 2>&1 | tee build/Release-build.log | xcbeautify; then
+            echo "===== RAW LOG TAIL (last 80 lines) ====="
+            tail -80 build/Release-build.log
+            exit 1
+          fi
           mkdir -p build
           ditto "build/Hammerspoon.app.xcarchive/Products/Applications/Hammerspoon.app" "build/Hammerspoon.app"
 
