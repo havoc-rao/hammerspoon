@@ -35,6 +35,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Trust third-party Homebrew tap
+        # Brewfile 使用 a7ex/homebrew-formulae（xcresultparser），
+        # 新版 Homebrew 要求先显式信任第三方 tap 才能安装其中的 formula
+        run: brew trust a7ex/formulae
+
       - name: Prepare build environment
         run: ./scripts/github-ci-pre.sh
 
@@ -68,7 +73,7 @@ jobs:
         run: ./scripts/build.sh archive
 
       - name: Upload build log on failure
-        if: failure()
+        if: failure() && hashFiles('build/Release-build.log') != ''
         uses: actions/upload-artifact@v4
         with:
           name: Release-build.log
