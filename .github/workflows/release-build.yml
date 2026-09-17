@@ -35,6 +35,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Restore annotated tags
+        # actions/checkout 对 tag 事件按 SHA 检出，本地 refs/tags/* 会退化为
+        # 轻量 tag；op_archive 里 git describe（只看 annotated tag）会失败。
+        run: git fetch --tags --force origin
+
       - name: Trust third-party Homebrew tap
         # Brewfile 使用 a7ex/homebrew-formulae（xcresultparser），
         # 新版 Homebrew 要求先显式信任第三方 tap 才能安装其中的 formula
@@ -66,10 +71,14 @@ jobs:
           fi
           mkdir -p build
           ditto "build/Hammerspoon.app.xcarchive/Products/Applications/Hammerspoon.app" "build/Hammerspoon.app"
+          # op_archive 会复制 build/*.plist（上游由 -exportArchive 生成），补占位
+          : > build/ExportOptions.plist
 
       - name: Get version
         id: version
-        run: echo "VERSION=$(git describe --abbrev=0)" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION="$(git describe --abbrev=0 2>/dev/null || echo "${GITHUB_REF_NAME}")"
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Create app zip
         # op_archive() 需要 build/Hammerspoon.app-${VERSION}.zip；

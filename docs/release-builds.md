@@ -17,9 +17,10 @@ git push origin v1.0.0
 
 1. 在 `macos-15` runner 上安装 Xcode 16.1.0；
 2. `./scripts/github-ci-pre.sh`：安装 brew / Python 依赖（coreutils、cocoapods、xcbeautify 等）；
-3. **构建 Release**：直接调用 `xcodebuild ... archive`，用**命令行参数** `CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=` 覆盖签名设置（项目 xcconfig 预设了官方 Developer ID + 团队 VQCYSNZB89，xcconfig 优先级高于环境变量，因此必须用命令行参数压过它）。产物为 **ad-hoc 签名**，不需要 Apple 开发者证书；随后从 `xcarchive` 直接拷出 `.app`（跳过 `-exportArchive`——其 `developer-id` 方法强制要求证书）；
-4. 打应用 zip、生成 API 文档、`./scripts/build.sh archive` 汇总产物；
-5. `softprops/action-gh-release` 把以下产物挂到 tag 的 Release 上：
+3. 恢复 annotated tags（`git fetch --tags --force`）：checkout 对 tag 事件按 SHA 检出，本地 tag 会退化为轻量 tag，而上游 `op_archive` 的 `git describe` 只看 annotated tag；
+4. **构建 Release**：直接调用 `xcodebuild ... archive`，用**命令行参数** `CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=` 覆盖签名设置（项目 xcconfig 预设了官方 Developer ID + 团队 VQCYSNZB89，xcconfig 优先级高于环境变量，因此必须用命令行参数压过它）。产物为 **ad-hoc 签名**，不需要 Apple 开发者证书；随后从 `xcarchive` 直接拷出 `.app`（跳过 `-exportArchive`——其 `developer-id` 方法强制要求证书），并补一个空的 `build/ExportOptions.plist` 满足 `op_archive` 的复制逻辑；
+5. 打应用 zip、生成 API 文档、`./scripts/build.sh archive` 汇总产物；
+6. `softprops/action-gh-release` 把以下产物挂到 tag 的 Release 上：
 
    - `Hammerspoon.app-<版本>.zip` —— 可安装的 macOS 应用
    - `Hammerspoon-dSYM-<版本>.zip` —— 调试符号
