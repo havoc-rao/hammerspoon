@@ -43,14 +43,6 @@ jobs:
       - name: Prepare build environment
         run: ./scripts/github-ci-pre.sh
 
-      - name: Provide Sentry token placeholder
-        # op_build_assert() 对 Release 配置要求存在
-        # ${TOKENPATH}/token-sentry-api 文件；没有 -u（不上传 dSYM 到 Sentry）
-        # 时该 token 不会被读取，占位即可。
-        run: |
-          mkdir -p ..
-          touch ../token-sentry-api
-
       - name: Build Release (ad-hoc signed)
         # 必须用命令行参数而不是环境变量覆盖签名设置：
         # Project-Release/Hammerspoon-Release.xcconfig 预设了

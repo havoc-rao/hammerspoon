@@ -17,10 +17,9 @@ git push origin v1.0.0
 
 1. 在 `macos-15` runner 上安装 Xcode 16.1.0；
 2. `./scripts/github-ci-pre.sh`：安装 brew / Python 依赖（coreutils、cocoapods、xcbeautify 等）；
-3. 生成占位的 Sentry token 文件（Release 配置构建的断言只要求文件存在；没有 `-u` 参数时不会真正使用）；
-4. **构建 Release**：直接调用 `xcodebuild ... archive`，用**命令行参数** `CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=` 覆盖签名设置（项目 xcconfig 预设了官方 Developer ID + 团队 VQCYSNZB89，xcconfig 优先级高于环境变量，因此必须用命令行参数压过它）。产物为 **ad-hoc 签名**，不需要 Apple 开发者证书；随后从 `xcarchive` 直接拷出 `.app`（跳过 `-exportArchive`——其 `developer-id` 方法强制要求证书）；
-5. 打应用 zip、生成 API 文档、`./scripts/build.sh archive` 汇总产物；
-6. `softprops/action-gh-release` 把以下产物挂到 tag 的 Release 上：
+3. **构建 Release**：直接调用 `xcodebuild ... archive`，用**命令行参数** `CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=` 覆盖签名设置（项目 xcconfig 预设了官方 Developer ID + 团队 VQCYSNZB89，xcconfig 优先级高于环境变量，因此必须用命令行参数压过它）。产物为 **ad-hoc 签名**，不需要 Apple 开发者证书；随后从 `xcarchive` 直接拷出 `.app`（跳过 `-exportArchive`——其 `developer-id` 方法强制要求证书）；
+4. 打应用 zip、生成 API 文档、`./scripts/build.sh archive` 汇总产物；
+5. `softprops/action-gh-release` 把以下产物挂到 tag 的 Release 上：
 
    - `Hammerspoon.app-<版本>.zip` —— 可安装的 macOS 应用
    - `Hammerspoon-dSYM-<版本>.zip` —— 调试符号
