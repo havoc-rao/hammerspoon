@@ -56,6 +56,8 @@ on:
 cd vendored/hammerspoon  # 仓库根目录
 ./scripts/build.sh installdeps   # 首次：装依赖
 # 命令行参数覆盖 xcconfig 的 Developer ID 签名设置，ad-hoc 签名
+# （用 Xcode 26/27 本地构建时再加 GCC_TREAT_WARNINGS_AS_ERRORS=NO，
+#   否则 LuaSkin 新版头文件检查告警会被 -Werror 升级为错误；CI 用 16.1 不需要）
 xcodebuild -workspace Hammerspoon.xcworkspace -scheme Release -configuration Release \
   -destination "platform=macOS" -archivePath "build/Hammerspoon.app.xcarchive" \
   CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= archive
